@@ -6,6 +6,8 @@
 #include "stdio.h"
 #include <cstdlib>
 
+#include "veng_math.h"
+
 // TODO: replace asserts and VK_CHECK for proper error handling and fallbacks
 #include "assert.h"
 #define VK_CHECK(x)\
@@ -14,12 +16,6 @@
         VkResult result = (x);\
         assert(result == VK_SUCCESS);\
     } while(0)
-
-#define ARRAY_COUNT(arr) sizeof(arr) / sizeof(arr[0])
-
-typedef unsigned int u32;
-typedef signed int s32;
-typedef float f32;
 
 static VkInstance CreateInstance()
 {
@@ -195,22 +191,21 @@ int main(int argc, char **argv)
         glfwPollEvents();
 
         u32 image_index = 0;
-        unsigned long long timeout = ~0ull - 50ull;
+        u64 timeout = ~0ull - 50ull;
         VK_CHECK(vkAcquireNextImageKHR(device, swapchain, timeout, acquire_semaphore, VK_NULL_HANDLE, &image_index));
 
         vkResetCommandPool(device, command_pool, 0);
 
         VkCommandBufferBeginInfo begin_info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        
         vkBeginCommandBuffer(command_buffer, &begin_info);
-
-        VkClearColorValue color = {0.0f, 0.0f, 1.0f, 1.0f};
-        VkImageSubresourceRange range = {};
-        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        range.levelCount = 1;
-        range.layerCount = 1;
-
-        vkCmdClearColorImage(command_buffer, swapchain_images[image_index], VK_IMAGE_LAYOUT_GENERAL, &color, 1, &range);
+            VkClearColorValue color = {0.0f, 0.0f, 1.0f, 1.0f};
+            VkImageSubresourceRange range = {};
+            range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            range.levelCount = 1;
+            range.layerCount = 1;
+            vkCmdClearColorImage(command_buffer, swapchain_images[image_index], VK_IMAGE_LAYOUT_GENERAL, &color, 1, &range);
         vkEndCommandBuffer(command_buffer);
 
         VkPipelineStageFlags submit_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;

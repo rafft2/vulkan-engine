@@ -2,7 +2,7 @@
 
 IF NOT EXIST .\bin mkdir .\bin
 
-set warning_opts=-Wall -WX -wd4100 -wd4820 -wd4189 -wd5045 -wd4005 -wd4668
+set warning_opts=-Wall -WX -wd4100 -wd4820 -wd4189 -wd5045 -wd4005 -wd4668 -wd4702 -wd4201 -wd5246
 set compile_out=-Fe:"bin\veng.exe" -Fo:"bin\veng.obj" -Fd:"bin\vc140.pdb"
 set additional_include=/I %VULKAN_SDK%\Include /I thirdparty\
 
