@@ -73,12 +73,27 @@ static VkPhysicalDevice CreatePhysicalDevice(VkInstance instance)
     return(physical_devices[0]);
 }
 
-static VkDevice CreateDevice(VkPhysicalDevice physical_device, u32 *family_index)
+static u32 GetGraphicsQueueFamilyIndex(VkPhysicalDevice physical_device)
+{
+    VkQueueFamilyProperties queue_family_properties[64];
+    u32 queue_count = ARRAY_COUNT(queue_family_properties);
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_count, queue_family_properties);
+
+    for(u32 i = 0; i < queue_count; i++)
+    {
+        if(queue_family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        {
+            return(i);
+        }
+    }
+    return(0);
+}
+
+static VkDevice CreateDevice(VkPhysicalDevice physical_device, u32 family_index)
 {
     f32 queue_priorities[] = {1.0f};
     VkDeviceQueueCreateInfo queue_create_info = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
-    *family_index = 0;
-    queue_create_info.queueFamilyIndex = *family_index;
+    queue_create_info.queueFamilyIndex = family_index;
     queue_create_info.queueCount = 1;
     queue_create_info.pQueuePriorities = queue_priorities;
 
@@ -108,12 +123,21 @@ static VkSurfaceKHR CreateSurface(VkInstance instance, GLFWwindow* window)
     return(surface);
 }
 
-static VkSwapchainKHR CreateSwapchain(VkDevice device, VkSurfaceKHR surface, u32 family_index, u32 width, u32 height)
+static VkFormat GetSwapchainFormat(VkPhysicalDevice physical_device, VkSurfaceKHR surface)
+{
+    VkSurfaceFormatKHR formats[16];
+    u32 format_count = ARRAY_COUNT(formats);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats));
+
+    return(formats[0].format);
+}
+
+static VkSwapchainKHR CreateSwapchain(VkDevice device, VkSurfaceKHR surface, u32 family_index, u32 width, u32 height, VkFormat format)
 {
     VkSwapchainCreateInfoKHR create_info = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     create_info.surface = surface;
     create_info.minImageCount = 2;
-    create_info.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    create_info.imageFormat = format;
     create_info.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     create_info.imageExtent = {width, height};
     create_info.imageArrayLayers = 1;
@@ -148,6 +172,160 @@ static VkCommandPool CreateCommandPool(VkDevice device, u32 family_index)
     return(command_pool);
 }
 
+static VkRenderPass CreateRenderPass(VkDevice device, VkFormat format)
+{
+    VkAttachmentDescription attachments[1] = {};
+    attachments[0].format = format;
+    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference color_attachments = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &color_attachments;
+
+    VkRenderPassCreateInfo create_info = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    create_info.attachmentCount = ARRAY_COUNT(attachments);
+    create_info.pAttachments = attachments;
+    create_info.subpassCount = 1;
+    create_info.pSubpasses = &subpass;
+
+    VkRenderPass render_pass = 0;
+    VK_CHECK(vkCreateRenderPass(device, &create_info, 0, &render_pass));
+    return(render_pass);
+}
+
+VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format)
+{
+    VkImageViewCreateInfo create_info = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    create_info.image = image;
+    create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    create_info.format = format;
+    create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    create_info.subresourceRange.levelCount = 1;
+    create_info.subresourceRange.layerCount = 1;
+
+    VkImageView view;
+    VK_CHECK(vkCreateImageView(device, &create_info, 0, &view));
+    return(view);
+}
+
+VkFramebuffer CreateFramebuffer(VkDevice device, VkRenderPass render_pass, VkImageView image_view, u32 width, u32 height)
+{
+    VkFramebufferCreateInfo create_info = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+    create_info.renderPass = render_pass;
+    create_info.attachmentCount = 1;
+    create_info.pAttachments = &image_view;
+    create_info.width = width;
+    create_info.height = height;
+    create_info.layers = 1;
+
+    VkFramebuffer framebuffer = 0;
+    VK_CHECK(vkCreateFramebuffer(device, &create_info, 0, &framebuffer));
+    return(framebuffer);
+}
+
+VkShaderModule LoadShader(VkDevice device, char *path)
+{
+    FILE *file = fopen(path, "rb");
+    assert(file);
+    fseek(file, 0, SEEK_END);
+    u64 length = (u64)ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *buffer = (char*)malloc(length);
+    fread(buffer, 1, length, file);
+    fclose(file);
+
+    VkShaderModuleCreateInfo create_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    create_info.codeSize = length;
+    create_info.pCode = (u32*)buffer;
+
+    VkShaderModule shader_module = 0;
+    VK_CHECK(vkCreateShaderModule(device, &create_info, 0, &shader_module));
+    return(shader_module);
+}
+
+VkPipelineLayout CreatePipelineLayout(VkDevice device)
+{
+    VkPipelineLayoutCreateInfo create_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+
+    VkPipelineLayout layout = 0;
+    VK_CHECK(vkCreatePipelineLayout(device, &create_info, 0, &layout));
+    return(layout);
+}
+
+VkPipeline CreateGraphicsPipeline(VkDevice device, VkPipelineCache pipeline_cache, VkRenderPass render_pass, VkPipelineLayout layout, VkShaderModule vert, VkShaderModule frag)
+{
+    VkGraphicsPipelineCreateInfo create_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+
+    VkPipelineShaderStageCreateInfo stages[2] = {};
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = vert;
+    stages[0].pName = "main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = frag;
+    stages[1].pName = "main";
+
+    create_info.stageCount = ARRAY_COUNT(stages);
+    create_info.pStages = stages;
+
+    VkPipelineVertexInputStateCreateInfo vertex_input = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    create_info.pVertexInputState = &vertex_input;
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    create_info.pInputAssemblyState = &input_assembly;
+
+    VkPipelineViewportStateCreateInfo viewport_state = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    viewport_state.viewportCount = 1;
+    viewport_state.scissorCount = 1;
+    create_info.pViewportState = &viewport_state;
+    
+    VkPipelineRasterizationStateCreateInfo raster_state = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    raster_state.lineWidth = 1.0f;
+    create_info.pRasterizationState = &raster_state;
+
+    VkPipelineMultisampleStateCreateInfo multisample_state = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    create_info.pMultisampleState = &multisample_state;
+
+    VkPipelineDepthStencilStateCreateInfo depth_stencil_state = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    create_info.pDepthStencilState = &depth_stencil_state;
+
+    VkPipelineColorBlendAttachmentState color_attachment_state = {};
+    color_attachment_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipelineColorBlendStateCreateInfo color_blend_state = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    color_blend_state.attachmentCount = 1;
+    color_blend_state.pAttachments = &color_attachment_state;
+    create_info.pColorBlendState = &color_blend_state;
+
+
+    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    
+    VkPipelineDynamicStateCreateInfo dynamic_state = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    dynamic_state.dynamicStateCount = ARRAY_COUNT(dynamic_states);
+    dynamic_state.pDynamicStates = dynamic_states;
+    create_info.pDynamicState = &dynamic_state;
+
+    create_info.layout = layout;
+    create_info.renderPass = render_pass;
+
+    VkPipeline pipeline = 0;
+    VK_CHECK(vkCreateGraphicsPipelines(device, pipeline_cache, 1, &create_info, 0, &pipeline));
+    return(pipeline);
+}
+
 int main(int argc, char **argv)
 {
     glfwInit(); GLFWwindow *window = glfwCreateWindow(1366, 768, "veng", 0, 0);
@@ -156,15 +334,17 @@ int main(int argc, char **argv)
 
     VkPhysicalDevice physical_device = CreatePhysicalDevice(instance);
 
-    u32 family_index = 0;
-    VkDevice device = CreateDevice(physical_device, &family_index);
+    u32 family_index = GetGraphicsQueueFamilyIndex(physical_device);
+    VkDevice device = CreateDevice(physical_device, family_index);
 
     VkSurfaceKHR surface = CreateSurface(instance, window);
     assert(surface);
 
-    s32 swapchain_width = 0; s32 swapchain_height = 0;
-    glfwGetWindowSize(window, &swapchain_width, &swapchain_height);
-    VkSwapchainKHR swapchain = CreateSwapchain(device, surface, family_index, (u32)swapchain_width, (u32)swapchain_height);
+    VkFormat format = GetSwapchainFormat(physical_device, surface);
+
+    s32 window_width = 0; s32 window_height = 0;
+    glfwGetWindowSize(window, &window_width, &window_height);
+    VkSwapchainKHR swapchain = CreateSwapchain(device, surface, family_index, (u32)window_width, (u32)window_height, format);
 
     VkSemaphore acquire_semaphore = CreateSemaphore(device);
     VkSemaphore release_semaphore = CreateSemaphore(device);
@@ -172,9 +352,30 @@ int main(int argc, char **argv)
     VkQueue queue = 0;
     vkGetDeviceQueue(device, family_index, 0, &queue);
 
+    VkRenderPass render_pass = CreateRenderPass(device, format);
+    assert(render_pass);
+
+    VkShaderModule triangle_vert = LoadShader(device, "./src/shaders/triangle.vert.spv");
+    VkShaderModule triangle_frag = LoadShader(device, "./src/shaders/triangle.frag.spv");
+
+    VkPipelineCache pipeline_cache = 0;
+    VkPipelineLayout layout = CreatePipelineLayout(device);
+    VkPipeline triangle_pipeline = CreateGraphicsPipeline(device, pipeline_cache, render_pass, layout, triangle_vert, triangle_frag);
+
     VkImage swapchain_images[16];
     u32 swapchain_image_count = ARRAY_COUNT(swapchain_images);
     vkGetSwapchainImagesKHR(device, swapchain, &swapchain_image_count, swapchain_images);
+
+    VkImageView swapchain_image_views[16];
+    for(u32 i = 0; i < swapchain_image_count; i++)
+    {
+        swapchain_image_views[i] = CreateImageView(device, swapchain_images[i], format);
+    }
+    VkFramebuffer swapchain_framebuffers[16];
+    for(u32 i = 0; i < swapchain_image_count; i++)
+    {
+        swapchain_framebuffers[i] = CreateFramebuffer(device, render_pass, swapchain_image_views[i], (u32)window_width, (u32)window_height);
+    }
 
     VkCommandPool command_pool = CreateCommandPool(device, family_index);
     
@@ -196,17 +397,33 @@ int main(int argc, char **argv)
 
         vkResetCommandPool(device, command_pool, 0);
 
-        VkCommandBufferBeginInfo begin_info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        VkCommandBufferBeginInfo begin_info = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         
-        vkBeginCommandBuffer(command_buffer, &begin_info);
-            VkClearColorValue color = {0.0f, 0.0f, 1.0f, 1.0f};
-            VkImageSubresourceRange range = {};
-            range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            range.levelCount = 1;
-            range.layerCount = 1;
-            vkCmdClearColorImage(command_buffer, swapchain_images[image_index], VK_IMAGE_LAYOUT_GENERAL, &color, 1, &range);
-        vkEndCommandBuffer(command_buffer);
+        VK_CHECK(vkBeginCommandBuffer(command_buffer, &begin_info));
+            VkClearColorValue color = {0.4f, 0.25f, 0.4f, 1.0f};
+            VkClearValue clear_color = {color};
+
+            VkRenderPassBeginInfo pass_begin_info = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+            pass_begin_info.renderPass = render_pass;
+            pass_begin_info.framebuffer = swapchain_framebuffers[image_index];
+            pass_begin_info.renderArea.extent.width = (u32)window_width;
+            pass_begin_info.renderArea.extent.height = (u32)window_height;
+            pass_begin_info.clearValueCount = 1;
+            pass_begin_info.pClearValues = &clear_color;
+
+            vkCmdBeginRenderPass(command_buffer, &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+                VkViewport viewport = {0, (f32)window_height, (f32)window_width, -(f32)window_height, 0, 1};
+                VkRect2D scissor = {{0, 0}, {(u32)window_width, (u32)window_height}};
+
+                vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+                vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, triangle_pipeline);
+                vkCmdDraw(command_buffer, 3, 1, 0, 0);
+            
+            vkCmdEndRenderPass(command_buffer);
+        VK_CHECK(vkEndCommandBuffer(command_buffer));
 
         VkPipelineStageFlags submit_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
