@@ -541,6 +541,64 @@ b32 LoadMesh(veng_mesh *inout, const char *path)
     return(true);
 }
 
+struct veng_buffer
+{
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+    void *data;
+    u32 size;
+};
+
+u32 SelectMemoryType(VkPhysicalDeviceMemoryProperties *memory_props, u32 memory_type_bits, VkMemoryPropertyFlags flags)
+{
+    for(u32 i = 0; i < memory_props->memoryTypeCount; i++)
+    {
+        if((memory_type_bits & (1 << i)) != 0 && (memory_props->memoryTypes[i].propertyFlags & flags) == flags)
+        {
+            return(i);
+        }
+    }
+    printf("No compatible memory type found.\n");
+    return(~0u);
+}
+
+void CreateBuffer(veng_buffer *result, VkDevice device, VkPhysicalDeviceMemoryProperties *memory_props, u32 size, VkBufferUsageFlags usage)
+{
+    VkBufferCreateInfo create_info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    create_info.size = size;
+    create_info.usage = usage;
+
+    VkBuffer buffer = 0;
+    vkCreateBuffer(device, &create_info, 0, &buffer);
+
+    VkMemoryRequirements memory_reqs;
+    vkGetBufferMemoryRequirements(device, buffer, &memory_reqs);
+
+    u32 memory_type_index = SelectMemoryType(memory_props, memory_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    VkMemoryAllocateInfo allocate_info = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    allocate_info.allocationSize = memory_reqs.size;
+    allocate_info.memoryTypeIndex = memory_type_index;
+
+    VkDeviceMemory memory = 0;
+    vkAllocateMemory(device, &allocate_info, 0, &memory);
+
+    VK_CHECK(vkBindBufferMemory(device, buffer, memory, 0));
+    void *data = 0;
+    VK_CHECK(vkMapMemory(device, memory, 0, size, 0, &data));
+
+    result->buffer = buffer;
+    result->memory = memory;
+    result->data = data;
+    result->size = size;
+}
+
+void DestroyBuffer(veng_buffer *buffer, VkDevice device)
+{
+    vkFreeMemory(device, buffer->memory, 0);
+    vkDestroyBuffer(device, buffer->buffer, 0);
+}
+
 int main(int argc, char **argv)
 {
     s32 window_width = 1366; s32 window_height = 768;
@@ -599,11 +657,25 @@ int main(int argc, char **argv)
     VkCommandBuffer command_buffer = 0;
     vkAllocateCommandBuffers(device, &allocate_info, &command_buffer);
 
-    veng_mesh sponza;
-    if(!LoadMesh(&sponza, "assets/sponza.obj"))
+    VkPhysicalDeviceMemoryProperties memory_props;
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_props);
+
+    veng_mesh mesh;
+    if(!LoadMesh(&mesh, "assets/sponza.obj"))
     {
         printf("error");
     }
+
+    veng_buffer vertex_buffer = {}; 
+    CreateBuffer(&vertex_buffer, device, &memory_props, Megabytes(128), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    veng_buffer index_buffer = {};
+    CreateBuffer(&index_buffer, device, &memory_props, Megabytes(128), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+
+    assert(vertex_buffer.size >= mesh.vertex_count * sizeof(veng_vertex));
+    memcpy(vertex_buffer.data, mesh.vertices, mesh.vertex_count * sizeof(veng_vertex));
+
+    assert(index_buffer.size >= mesh.index_count * sizeof(u32));
+    memcpy(index_buffer.data, mesh.indices, mesh.index_count * sizeof(u32));
 
     while(!glfwWindowShouldClose(window))
     {

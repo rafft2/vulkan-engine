@@ -11,7 +11,15 @@ typedef unsigned int b32;
 typedef float f32;
 typedef double f64;
 
+#define Kilobyes(value) ((value) * 1024LL)
+#define Megabytes(value) (Kilobyes(value) * 1024LL)
+#define Gigabytes(value) (Megabytes(value) * 1024LL)
+#define Terabytes(value) (Gigabytes(value) * 1024LL)
+
 #define PI32 3.14159265359f
+#define EPSILON32 1e-5f
+#define EPSILON64 1e-9
+
 #define DEG2RAD(degrees) ((degrees) * PI32 / 180.0f)
 #define RAD2DEG(radians) ((radians) * 180.0f / PI32)
 #define MINIMUM(A, B) ((A < B) ? (A) : (B))
