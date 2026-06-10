@@ -340,6 +340,51 @@ VkShaderModule LoadShader(VkDevice device, char *path)
     return(shader_module);
 }
 
+struct veng_vertex
+{
+    vec3 pos;
+    vec3 normal;
+    f32 tu, tv;
+};
+
+struct veng_mesh
+{
+    veng_vertex *vertices;
+    u32 vertex_count;
+
+    u32 *indices;
+    u32 index_count;
+};
+
+b32 LoadMesh(veng_mesh *inout, const char *path)
+{
+    fastObjMesh *mesh = fast_obj_read(path);
+    if(!mesh)
+    {
+        return(false);
+    }
+    inout->vertex_count = mesh->position_count;
+    inout->vertices = (veng_vertex*)malloc(inout->vertex_count * sizeof(veng_vertex));
+
+    for(u32 i = 0; i < inout->vertex_count; i++)
+    {
+        inout->vertices[i].pos = *(vec3*)(&mesh->positions[i * 3]);
+        inout->vertices[i].normal = *(vec3*)(&mesh->normals[i * 3]);
+        inout->vertices[i].tu = mesh->texcoords[i * 2 + 0];
+        inout->vertices[i].tv = mesh->texcoords[i * 2 + 1];
+    }
+
+    inout->index_count = mesh->index_count;
+    inout->indices = (u32*)malloc(inout->index_count*sizeof(u32));
+    for(u32 i = 0; i < inout->index_count; i++)
+    {
+        inout->indices[i] = mesh->indices[i].p;
+    }
+
+    fast_obj_destroy(mesh);
+    return(true);
+}
+
 VkPipelineLayout CreatePipelineLayout(VkDevice device)
 {
     VkPipelineLayoutCreateInfo create_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -368,6 +413,23 @@ VkPipeline CreateGraphicsPipeline(VkDevice device, VkPipelineCache pipeline_cach
 
     VkPipelineVertexInputStateCreateInfo vertex_input = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
     create_info.pVertexInputState = &vertex_input;
+
+    VkVertexInputBindingDescription stream = {0, sizeof(veng_vertex), VK_VERTEX_INPUT_RATE_VERTEX };
+    VkVertexInputAttributeDescription attributes[3] = {};
+    attributes[0].location = 0;
+    attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributes[0].offset = 0;
+    attributes[1].location = 1;
+    attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributes[1].offset = 12;
+    attributes[2].location = 2;
+    attributes[2].format = VK_FORMAT_R32G32_SFLOAT;
+    attributes[2].offset = 24;
+
+    vertex_input.vertexBindingDescriptionCount = 1;
+    vertex_input.pVertexBindingDescriptions = &stream;
+    vertex_input.vertexAttributeDescriptionCount = 3;
+    vertex_input.pVertexAttributeDescriptions = attributes;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
     input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -475,70 +537,6 @@ static void CreateOrResizeSwapchain(veng_swapchain *result,
     }
     result->width = width;
     result->height = height;
-}
-
-struct veng_vertex
-{
-    vec3 pos;
-    vec3 normal;
-    // TODO: vec2
-    f32 tu, tv;
-};
-
-struct veng_mesh
-{
-    veng_vertex *vertices;
-    u32 vertex_count;
-
-    u32 *indices;
-    u32 index_count;
-};
-
-b32 LoadMesh(veng_mesh *inout, const char *path)
-{
-    fastObjMesh *mesh = fast_obj_read(path);
-    if(!mesh)
-    {
-        return(false);
-    }
-    inout->vertex_count = mesh->position_count;
-    inout->vertices = (veng_vertex*)malloc(inout->vertex_count * sizeof(veng_vertex));
-
-    for(u32 i = 0; i < inout->vertex_count; i++)
-    {
-        inout->vertices[i].pos = *(vec3*)(&mesh->positions[i * 3]);
-
-        if(mesh->normals && i < mesh->normal_count)
-        {
-            inout->vertices[i].normal = *(vec3*)(&mesh->normals[i * 3]);
-        }
-        else
-        {
-            inout->vertices[i].normal = {0.0f, 0.0f, 1.0f};
-        }
-
-        if(mesh->texcoords && i < mesh->texcoord_count)
-        {
-            inout->vertices[i].tu = mesh->texcoords[i * 2 + 0];
-            inout->vertices[i].tv = mesh->texcoords[i * 2 + 1];
-        }
-        else
-        {
-            inout->vertices[i].tu = 0.0f;
-            inout->vertices[i].tv = 0.0f;
-        }
-    }
-
-    u32 index_count = mesh->face_count * 3;
-    inout->index_count = index_count;
-    inout->indices = (u32*)malloc(index_count*sizeof(u32));
-    for(u32 i = 1; i < index_count; i++)
-    {
-        inout->indices[i] = mesh->indices[i].p;
-    }
-
-    fast_obj_destroy(mesh);
-    return(true);
 }
 
 struct veng_buffer
@@ -661,7 +659,7 @@ int main(int argc, char **argv)
     vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_props);
 
     veng_mesh mesh;
-    if(!LoadMesh(&mesh, "assets/sponza.obj"))
+    if(!LoadMesh(&mesh, "assets/kitten.obj"))
     {
         printf("error");
     }
@@ -725,7 +723,10 @@ int main(int argc, char **argv)
                 vkCmdSetViewport(command_buffer, 0, 1, &viewport);
                 vkCmdSetScissor(command_buffer, 0, 1, &scissor);
                 vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, triangle_pipeline);
-                vkCmdDraw(command_buffer, 3, 1, 0, 0);
+                VkDeviceSize device_offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer.buffer, &device_offset);
+                vkCmdBindIndexBuffer(command_buffer, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
             
             vkCmdEndRenderPass(command_buffer);
             
