@@ -1,10 +1,14 @@
 #include "glfw3.h"
 #include "glfw3native.h"
 
-#ifndef VOLK_IMPLEMENTATION
 #define VOLK_IMPLEMENTATION
-#endif
 #include <volk.h>
+
+#define FAST_OBJ_IMPLEMENTATION
+#pragma warning(push, 0)
+#include <fast_obj.h>
+#pragma warning(pop)
+#include <meshoptimizer.h>
 
 #include "stdio.h"
 #include <cstdlib>
@@ -473,6 +477,70 @@ static void CreateOrResizeSwapchain(veng_swapchain *result,
     result->height = height;
 }
 
+struct veng_vertex
+{
+    vec3 pos;
+    vec3 normal;
+    // TODO: vec2
+    f32 tu, tv;
+};
+
+struct veng_mesh
+{
+    veng_vertex *vertices;
+    u32 vertex_count;
+
+    u32 *indices;
+    u32 index_count;
+};
+
+b32 LoadMesh(veng_mesh *inout, const char *path)
+{
+    fastObjMesh *mesh = fast_obj_read(path);
+    if(!mesh)
+    {
+        return(false);
+    }
+    inout->vertex_count = mesh->position_count;
+    inout->vertices = (veng_vertex*)malloc(inout->vertex_count * sizeof(veng_vertex));
+
+    for(u32 i = 0; i < inout->vertex_count; i++)
+    {
+        inout->vertices[i].pos = *(vec3*)(&mesh->positions[i * 3]);
+
+        if(mesh->normals && i < mesh->normal_count)
+        {
+            inout->vertices[i].normal = *(vec3*)(&mesh->normals[i * 3]);
+        }
+        else
+        {
+            inout->vertices[i].normal = {0.0f, 0.0f, 1.0f};
+        }
+
+        if(mesh->texcoords && i < mesh->texcoord_count)
+        {
+            inout->vertices[i].tu = mesh->texcoords[i * 2 + 0];
+            inout->vertices[i].tv = mesh->texcoords[i * 2 + 1];
+        }
+        else
+        {
+            inout->vertices[i].tu = 0.0f;
+            inout->vertices[i].tv = 0.0f;
+        }
+    }
+
+    u32 index_count = mesh->face_count * 3;
+    inout->index_count = index_count;
+    inout->indices = (u32*)malloc(index_count*sizeof(u32));
+    for(u32 i = 1; i < index_count; i++)
+    {
+        inout->indices[i] = mesh->indices[i].p;
+    }
+
+    fast_obj_destroy(mesh);
+    return(true);
+}
+
 int main(int argc, char **argv)
 {
     s32 window_width = 1366; s32 window_height = 768;
@@ -530,6 +598,12 @@ int main(int argc, char **argv)
 
     VkCommandBuffer command_buffer = 0;
     vkAllocateCommandBuffers(device, &allocate_info, &command_buffer);
+
+    veng_mesh sponza;
+    if(!LoadMesh(&sponza, "assets/sponza.obj"))
+    {
+        printf("error");
+    }
 
     while(!glfwWindowShouldClose(window))
     {
