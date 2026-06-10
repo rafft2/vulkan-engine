@@ -1,7 +1,10 @@
-#include "GLFW/glfw3.h"
-#include "GLFW/glfw3native.h"
+#include "glfw3.h"
+#include "glfw3native.h"
 
-#include <vulkan/vulkan.h>
+#ifndef VOLK_IMPLEMENTATION
+#define VOLK_IMPLEMENTATION
+#endif
+#include <volk.h>
 
 #include "stdio.h"
 #include <cstdlib>
@@ -79,8 +82,7 @@ static VkDebugReportCallbackEXT RegisterDebugCallback(VkInstance instance)
     VkDebugReportCallbackCreateInfoEXT create_info = { VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT };
     create_info.flags = VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT | VK_DEBUG_REPORT_ERROR_BIT_EXT;
     create_info.pfnCallback = DebugReportCallback;
-   
-    PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
+
     VkDebugReportCallbackEXT callback = 0;
     vkCreateDebugReportCallbackEXT(instance, &create_info, 0, &callback);
     return(callback);
@@ -475,8 +477,10 @@ int main(int argc, char **argv)
 {
     s32 window_width = 1366; s32 window_height = 768;
     glfwInit(); GLFWwindow *window = glfwCreateWindow(window_width, window_height, "veng", 0, 0);
-
+    
+    volkInitialize();
     VkInstance instance = CreateInstance();
+    volkLoadInstance(instance);
 
     VkDebugReportCallbackEXT debug_callback = RegisterDebugCallback(instance);
 
@@ -485,6 +489,7 @@ int main(int argc, char **argv)
     u32 family_index = GetGraphicsFamilyIndex(physical_device);
     assert(family_index != VK_QUEUE_FAMILY_IGNORED);
     VkDevice device = CreateDevice(physical_device, family_index);
+    volkLoadDevice(device);
 
     VkSurfaceKHR surface = CreateSurface(instance, window);
     assert(surface);
